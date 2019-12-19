@@ -5,10 +5,9 @@
 #include <vector>
 #include <algorithm>
 
-#define MAX_LINE_LENGTH 4096
-
 typedef std::map<std::string, std::multimap<std::string, std::string>> ini_data_struct;
 typedef std::multimap<std::string, std::string> string_multimap;
+typedef std::vector<std::string> string_array;
 
 class INIReader
 {
@@ -33,13 +32,9 @@ private:
     bool chkIgnore(std::string section)
     {
         bool excluded = false, included = false;
-        if(count(exclude_sections.begin(), exclude_sections.end(), section) > 0)
-            excluded = true;
-        if(include_sections.size() != 0)
-        {
-            if(count(include_sections.begin(), include_sections.end(), section) > 0)
-                included = true;
-        }
+        excluded = std::find(exclude_sections.cbegin(), exclude_sections.cend(), section) != exclude_sections.cend();
+        if(include_sections.size())
+            included = std::find(include_sections.cbegin(), include_sections.cend(), section) != include_sections.cend();
         else
             included = true;
 
@@ -131,7 +126,7 @@ public:
         string_multimap itemGroup, existItemGroup;
         std::stringstream strStrm;
         unsigned int lineSize = 0;
-        //char delimiter = count(content.begin(), content.end(), '\n') <= 1 ? '\r' : '\n';
+        char delimiter = count(content.begin(), content.end(), '\n') < 1 ? '\r' : '\n';
 
         EraseAll(); //first erase all data
         if(do_utf8_to_gbk && is_str_utf8(content))
@@ -140,15 +135,14 @@ public:
         if(store_isolated_line)
             curSection = isolated_items_section; //items before any section define will be store in this section
         strStrm<<content;
-        //while(getline(strStrm, strLine, delimiter))
-        while(getline(strStrm, strLine)) //get one line of content
+        while(getline(strStrm, strLine, delimiter)) //get one line of content
         {
             lineSize = strLine.size();
-            if(!lineSize || lineSize > MAX_LINE_LENGTH || strLine[0] == ';' || strLine[0] == '#') //empty lines, lines longer than MAX_LINE_LENGTH and comments are ignored
+            if(!lineSize || strLine[0] == ';' || strLine[0] == '#') //empty lines and comments are ignored
                 continue;
             if(strLine[lineSize - 1] == '\r') //remove line break
             {
-                strLine.replace(lineSize - 1, 0, "");
+                strLine = strLine.substr(0, lineSize - 1);
                 lineSize--;
             }
             if(strLine.find("=") != strLine.npos) //is an item
@@ -253,6 +247,7 @@ public:
         {
             retData.emplace_back(x.first);
         }
+        //std::transform(ini_content.begin(), ini_content.end(), back_inserter(retData), [](auto x) -> std::string {return x.first;});
 
         return retData;
     }
@@ -356,7 +351,7 @@ public:
     /**
     *  @brief Retrieve all items in the given section.
     */
-    int GetItems(std::string section, std::multimap<std::string, std::string> &data)
+    int GetItems(std::string section, string_multimap &data)
     {
         if(!parsed || !SectionExist(section))
             return -1;
@@ -521,8 +516,6 @@ public:
     */
     int Set(std::string section, std::string itemName, std::string itemVal)
     {
-        std::string value;
-
         if(!section.size())
             return -1;
 
@@ -714,13 +707,13 @@ public:
             for(auto &y : x.second)
             {
                 if(y.first != "{NONAME}")
-                    content += y.first + " = ";
+                    content += y.first + "=";
                 content += y.second + "\n";
             }
             content += "\n";
         }
 
-        return content;
+        return content.substr(0, content.size() - 2);
     }
 
     /**

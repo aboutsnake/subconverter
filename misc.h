@@ -20,6 +20,7 @@ static const std::string base64_chars =
              "abcdefghijklmnopqrstuvwxyz"
              "0123456789+/";
 
+std::string UrlEncode(const std::string& str);
 std::string UrlDecode(const std::string& str);
 std::string base64_decode(std::string encoded_string);
 std::string base64_encode(std::string string_to_encode);
@@ -29,15 +30,17 @@ std::string getUrlArg(std::string url, std::string request);
 std::string replace_all_distinct(std::string str, std::string old_value, std::string new_value);
 std::string urlsafe_base64_reverse(std::string encoded_string);
 std::string urlsafe_base64_decode(std::string encoded_string);
+std::string urlsafe_base64_encode(std::string string_to_encode);
 std::string UTF8ToGBK(std::string str_src);
 std::string GBKToUTF8(std::string str_src);
 std::string trim(const std::string& str);
 std::string getSystemProxy();
 std::string rand_str(const int len);
 bool is_str_utf8(std::string data);
-std::string getFormData(std::string &raw_data);
+std::string getFormData(const std::string &raw_data);
 
 void sleep(int interval);
+bool regValid(std::string &reg);
 bool regFind(std::string src, std::string target);
 std::string regReplace(std::string src, std::string match, std::string rep);
 bool regMatch(std::string src, std::string match);
@@ -49,7 +52,7 @@ void urlParse(std::string url, std::string &host, std::string &path, int &port, 
 void removeUTF8BOM(std::string &data);
 int shortAssemble(unsigned short num_a, unsigned short num_b);
 void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b);
-std::string to_string(YAML::Node &node);
+int to_int(std::string &s, int def_vaule = 0);
 
 std::string fileGet(std::string path, bool binary = true);
 int fileWrite(std::string path, std::string content, bool overwrite);
@@ -76,7 +79,7 @@ namespace std
         template <typename T> std::string to_string(const T& n)
         {
             std::ostringstream ss;
-            ss << n ;
+            ss << n;
             return ss.str();
         }
     }

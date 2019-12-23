@@ -1308,6 +1308,8 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
         switch(x.linkType)
         {
         case SPEEDTEST_MESSAGE_FOUNDSS:
+            if(plugin == "obfs-local")
+                plugin = "simple-obfs";
             writer.StartObject();
             writer.Key("server");
             writer.String(hostname.data());
@@ -1543,6 +1545,7 @@ std::string netchToMellow(std::vector<nodeInfo> &nodes, std::string &base_conf, 
     }
 
     rulesetToSurge(ini, ruleset_content_array, 2);
+    ini.RenameSection("Rule", "RoutingRule");
 
     return ini.ToString();
 }

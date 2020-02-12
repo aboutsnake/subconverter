@@ -8,12 +8,15 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <string.h>
 #include <pthread.h>
 
 #include "misc.h"
 #include "webserver.h"
 #include "socket.h"
+
+extern std::string user_agent_str;
 
 struct responseRoute
 {
@@ -33,7 +36,7 @@ static inline void buffer_cleanup(struct evbuffer *eb)
 #endif // MALLOC_TRIM
 }
 
-static inline int process_request(const char *method_str, std::string uri, std::string &postdata, std::string &content_type, std::string &return_data)
+static inline int process_request(const char *method_str, std::string uri, std::string &postdata, std::string &content_type, std::string &return_data, int *status_code, std::map<std::string, std::string> &extra_headers)
 {
     std::string path, arguments;
     std::cerr << "handle_cmd:    " << method_str << std::endl << "handle_uri:    " << uri << std::endl;
@@ -55,7 +58,7 @@ static inline int process_request(const char *method_str, std::string uri, std::
         else if(x.method.compare(method_str) == 0 && x.path == path)
         {
             response_callback &rc = x.rc;
-            return_data = rc(arguments, postdata);
+            return_data = rc(arguments, postdata, status_code, extra_headers);
             content_type = x.content_type;
             return 0;
         }
@@ -68,8 +71,19 @@ void OnReq(evhttp_request *req, void *args)
 {
     const char *req_content_type = evhttp_find_header(req->input_headers, "Content-Type"), *req_ac_method = evhttp_find_header(req->input_headers, "Access-Control-Request-Method");
     const char *req_method = req_ac_method == NULL ? EVBUFFER_LENGTH(req->input_buffer) == 0 ? "GET" : "POST" : "OPTIONS", *uri = req->uri;
+    const char *user_agent = evhttp_find_header(req->input_headers, "User-Agent");
+    char *client_ip;
+    u_short client_port;
+    evhttp_connection_get_peer(evhttp_request_get_connection(req), &client_ip, &client_port);
+    std::cerr<<"Accept connection from client "<<client_ip<<":"<<client_port<<"\n";
     int retVal;
     std::string postdata, content_type, return_data;
+
+    if(user_agent != NULL && user_agent_str.compare(user_agent) == 0)
+    {
+        evhttp_send_error(req, 500, "Loop request detected!");
+        return;
+    }
 
     if(EVBUFFER_LENGTH(req->input_buffer) != 0)
     {
@@ -82,19 +96,24 @@ void OnReq(evhttp_request *req, void *args)
         postdata.assign(req_ac_method);
     }
 
-    retVal = process_request(req_method, uri, postdata, content_type, return_data);
+    int status_code = 200;
+    std::map<std::string, std::string> extra_headers;
+    retVal = process_request(req_method, uri, postdata, content_type, return_data, &status_code, extra_headers);
 
     //auto *OutBuf = evhttp_request_get_output_buffer(req);
     struct evbuffer *OutBuf = evbuffer_new();
     if (!OutBuf)
         return;
 
+    for(auto &x : extra_headers)
+        evhttp_add_header(req->output_headers, x.first.data(), x.second.data());
+
     switch(retVal)
     {
     case 1: //found OPTIONS
         evhttp_add_header(req->output_headers, "Access-Control-Allow-Origin", "*");
         evhttp_add_header(req->output_headers, "Access-Control-Allow-Headers", "*");
-        evhttp_send_reply(req, HTTP_OK, "", NULL);
+        evhttp_send_reply(req, status_code, "", NULL);
         break;
     case 0: //found normal
         if(content_type.size())
@@ -112,10 +131,13 @@ void OnReq(evhttp_request *req, void *args)
         evhttp_add_header(req->output_headers, "Access-Control-Allow-Origin", "*");
         evhttp_add_header(req->output_headers, "Connection", "close");
         evbuffer_add(OutBuf, return_data.data(), return_data.size());
-        evhttp_send_reply(req, HTTP_OK, "", OutBuf);
+        evhttp_send_reply(req, status_code, "", OutBuf);
         break;
     case -1: //not found
-        evhttp_send_error(req, HTTP_NOTFOUND, "Resource not found");
+        return_data = "File not found.";
+        evbuffer_add(OutBuf, return_data.data(), return_data.size());
+        evhttp_send_reply(req, HTTP_NOTFOUND, "", OutBuf);
+        //evhttp_send_error(req, HTTP_NOTFOUND, "Resource not found");
         break;
     default: //undefined behavior
         evhttp_send_error(req, HTTP_INTERNAL, "");

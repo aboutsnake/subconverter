@@ -40,7 +40,7 @@ bool is_str_utf8(std::string data);
 std::string getFormData(const std::string &raw_data);
 
 void sleep(int interval);
-bool regValid(std::string &reg);
+bool regValid(std::string &target);
 bool regFind(std::string src, std::string target);
 std::string regReplace(std::string src, std::string match, std::string rep);
 bool regMatch(std::string src, std::string match);
@@ -56,7 +56,7 @@ int to_int(std::string str, int def_vaule = 0);
 std::string UTF8ToCodePoint(std::string data);
 std::string GetEnv(std::string name);
 
-std::string fileGet(std::string path, bool binary = true);
+std::string fileGet(std::string path, bool binary, bool scope_limit = false);
 int fileWrite(std::string path, std::string content, bool overwrite);
 bool fileExist(std::string path);
 bool fileCopy(std::string source,std::string dest);

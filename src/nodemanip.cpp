@@ -9,7 +9,7 @@
 #include "webget.h"
 #include "speedtestutil.h"
 
-std::string override_conf_port, custom_group;
+std::string override_conf_port;
 int socksport;
 bool ss_libev, ssr_libev;
 extern bool api_mode;
@@ -22,12 +22,12 @@ void copyNodes(std::vector<nodeInfo> &source, std::vector<nodeInfo> &dest)
     }
 }
 
-void addNodes(std::string link, std::vector<nodeInfo> &allNodes, int groupID, std::string proxy, string_array &exclude_remarks, string_array &include_remarks)
+int addNodes(std::string link, std::vector<nodeInfo> &allNodes, int groupID, std::string proxy, string_array &exclude_remarks, string_array &include_remarks, string_array &stream_rules, string_array &time_rules, std::string &subInfo)
 {
     int linkType = -1;
     std::vector<nodeInfo> nodes;
     nodeInfo node;
-    std::string strSub;
+    std::string strSub, extra_headers;
 
     link = replace_all_distinct(link, "\"", "");
     writeLog(LOG_TYPE_INFO, "Received Link.");
@@ -52,7 +52,7 @@ void addNodes(std::string link, std::vector<nodeInfo> &allNodes, int groupID, st
         writeLog(LOG_TYPE_INFO, "Downloading subscription data...");
         if(strFind(link, "surge:///install-config")) //surge config link
             link = UrlDecode(getUrlArg(link, "url"));
-        strSub = webGet(link, proxy);
+        strSub = webGet(link, proxy, extra_headers);
         /*
         if(strSub.size() == 0)
         {
@@ -70,7 +70,21 @@ void addNodes(std::string link, std::vector<nodeInfo> &allNodes, int groupID, st
         if(strSub.size())
         {
             writeLog(LOG_TYPE_INFO, "Parsing subscription data...");
-            explodeConfContent(strSub, override_conf_port, socksport, ss_libev, ssr_libev, nodes, exclude_remarks, include_remarks);
+            if(explodeConfContent(strSub, override_conf_port, socksport, ss_libev, ssr_libev, nodes) == SPEEDTEST_ERROR_UNRECOGFILE)
+            {
+                writeLog(LOG_TYPE_ERROR, "Invalid subscription!");
+                return -1;
+            }
+            if(strSub.find("ssd://") == 0)
+            {
+                getSubInfoFromSSD(strSub, subInfo);
+            }
+            else
+            {
+                if(!getSubInfoFromHeader(extra_headers, subInfo))
+                    getSubInfoFromNodes(nodes, stream_rules, time_rules, subInfo);
+            }
+            filterNodes(nodes, exclude_remarks, include_remarks, groupID);
             for(nodeInfo &x : nodes)
                 x.groupID = groupID;
             copyNodes(nodes, allNodes);
@@ -78,42 +92,48 @@ void addNodes(std::string link, std::vector<nodeInfo> &allNodes, int groupID, st
         else
         {
             writeLog(LOG_TYPE_ERROR, "Cannot download subscription data.");
+            return -1;
         }
         break;
     case SPEEDTEST_MESSAGE_FOUNDLOCAL:
         if(api_mode)
-            break;
+            return -1;
         writeLog(LOG_TYPE_INFO, "Parsing configuration file data...");
-        if(explodeConf(link, override_conf_port, socksport, ss_libev, ssr_libev, nodes, exclude_remarks, include_remarks) == SPEEDTEST_ERROR_UNRECOGFILE)
+        if(explodeConf(link, override_conf_port, socksport, ss_libev, ssr_libev, nodes) == SPEEDTEST_ERROR_UNRECOGFILE)
         {
             writeLog(LOG_TYPE_ERROR, "Invalid configuration file!");
+            return -1;
+        }
+        if(strSub.find("ssd://") == 0)
+        {
+            getSubInfoFromSSD(strSub, subInfo);
         }
         else
         {
-            for(nodeInfo &x : nodes)
-                x.groupID = groupID;
-            copyNodes(nodes, allNodes);
+            getSubInfoFromNodes(nodes, stream_rules, time_rules, subInfo);
         }
+        filterNodes(nodes, exclude_remarks, include_remarks, groupID);
+        for(nodeInfo &x : nodes)
+            x.groupID = groupID;
+        copyNodes(nodes, allNodes);
         break;
     default:
         if(linkType > 0)
         {
             explode(link, ss_libev, ssr_libev, override_conf_port, socksport, node);
-            if(custom_group.size() != 0)
-                node.group = custom_group;
-            if(node.server == "")
+            if(node.linkType == -1)
             {
                 writeLog(LOG_TYPE_ERROR, "No valid link found.");
+                return -1;
             }
-            else
-            {
-                node.groupID = groupID;
-                allNodes.push_back(node);
-            }
+            node.groupID = groupID;
+            allNodes.push_back(node);
         }
         else
         {
             writeLog(LOG_TYPE_ERROR, "No valid link found.");
+            return -1;
         }
     }
+    return 0;
 }

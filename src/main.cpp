@@ -1,15 +1,17 @@
 #include <iostream>
 #include <string>
 #include <unistd.h>
+#include <signal.h>
 
 #include "interfaces.h"
 #include "version.h"
 #include "misc.h"
 #include "socket.h"
 #include "webget.h"
+#include "logger.h"
 
-extern std::string pref_path, access_token, listen_address;
-extern bool api_mode, cfw_child_process, update_ruleset_on_request;
+extern std::string pref_path, access_token, listen_address, gen_profile;
+extern bool api_mode, generator_mode, cfw_child_process, update_ruleset_on_request;
 extern int listen_port, max_concurrent_threads, max_pending_connections;
 extern string_array rulesets;
 extern std::vector<ruleset_content> ruleset_content_array;
@@ -57,30 +59,74 @@ void chkArg(int argc, char *argv[])
         }
         else if(strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--file") == 0)
             pref_path.assign(argv[++i]);
+        else if(strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gen") == 0)
+            generator_mode = true;
+        else if(strcmp(argv[i], "--artifact") == 0)
+            gen_profile.assign(argv[++i]);
+    }
+}
+
+void signal_handler(int sig)
+{
+    //std::cerr<<"Interrupt signal "<<sig<<" received. Exiting gracefully...\n";
+    writeLog(0, "Interrupt signal " + std::to_string(sig) + " received. Exiting gracefully...", LOG_LEVEL_FATAL);
+    switch(sig)
+    {
+#ifndef _WIN32
+    case SIGHUP:
+    case SIGQUIT:
+#endif // _WIN32
+    case SIGTERM:
+    case SIGINT:
+        stop_web_server();
+        break;
     }
 }
 
 int main(int argc, char *argv[])
 {
+    writeLog(0, "SubConverter " VERSION " starting up..", LOG_LEVEL_INFO);
 #ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0)
     {
-        fprintf(stderr, "WSAStartup failed.\n");
+        //std::cerr<<"WSAStartup failed.\n";
+        writeLog(0, "WSAStartup failed.", LOG_LEVEL_FATAL);
         return 1;
     }
+    UINT origcp = GetConsoleOutputCP();
     SetConsoleOutputCP(65001);
+#else
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGABRT, SIG_IGN);
+    signal(SIGHUP, signal_handler);
+    signal(SIGQUIT, signal_handler);
 #endif // _WIN32
+    signal(SIGTERM, signal_handler);
+    signal(SIGINT, signal_handler);
 
-    SetConsoleTitle("subconverter " VERSION);
+    SetConsoleTitle("SubConverter " VERSION);
+#ifndef _DEBUG
+    std::string prgpath = argv[0];
+    setcd(prgpath); //first switch to program directory
+#endif // _DEBUG
     if(fileExist("pref.yml"))
         pref_path = "pref.yml";
     chkArg(argc, argv);
-    setcd(pref_path);
+    setcd(pref_path); //then switch to pref directory
     readConf();
     if(!update_ruleset_on_request)
         refreshRulesets(rulesets, ruleset_content_array);
     generateBase();
+
+    if(generator_mode)
+    {
+        int retVal = simpleGenerator();
+#ifdef _WIN32
+        SetConsoleOutputCP(origcp);
+#endif // _WIN32
+        return retVal;
+    }
 
     append_response("GET", "/", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
@@ -156,6 +202,12 @@ int main(int argc, char *argv[])
 
     append_response("GET", "/getruleset", "text/plain;charset=utf-8", getRuleset);
 
+    append_response("GET", "/getprofile", "text/plain;charset=utf-8", getProfile);
+
+    append_response("GET", "/qx-script", "text/plain;charset=utf-8", getScript);
+
+    append_response("GET", "/qx-rewrite", "text/plain;charset=utf-8", getRewriteRemote);
+
     append_response("GET", "/clash", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
         return subconverter(argument + "&target=clash", postdata, status_code, extra_headers);
@@ -211,6 +263,11 @@ int main(int argc, char *argv[])
         return subconverter(argument + "&target=quanx", postdata, status_code, extra_headers);
     });
 
+    append_response("GET", "/loon", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
+    {
+        return subconverter(argument + "&target=loon", postdata, status_code, extra_headers);
+    });
+
     append_response("GET", "/ssd", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
         return subconverter(argument + "&target=ssd", postdata, status_code, extra_headers);
@@ -226,7 +283,7 @@ int main(int argc, char *argv[])
 
         append_response("GET", "/getlocal", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
         {
-            return fileGet(UrlDecode(getUrlArg(argument, "path")), false);
+            return fileGet(UrlDecode(getUrlArg(argument, "path")));
         });
     }
 
@@ -234,7 +291,8 @@ int main(int argc, char *argv[])
     if(env_port.size())
         listen_port = to_int(env_port, listen_port);
     listener_args args = {listen_address, listen_port, max_pending_connections, max_concurrent_threads};
-    std::cout<<"Serving HTTP @ http://"<<listen_address<<":"<<listen_port<<std::endl;
+    //std::cout<<"Serving HTTP @ http://"<<listen_address<<":"<<listen_port<<std::endl;
+    writeLog(0, "Startup completed. Serving HTTP @ http://" + listen_address + ":" + std::to_string(listen_port), LOG_LEVEL_INFO);
     start_web_server_multi(&args);
 
 #ifdef _WIN32

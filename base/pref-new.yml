@@ -2,6 +2,7 @@ common:
   api_mode: false
   api_access_token: password
   default_url: []
+  insert_url: []
   exclude_remarks: ["(到期|剩余流量|时间|官网|产品)"]
   include_remarks: []
   clash_rule_base: base/simple_base.yml
@@ -10,6 +11,8 @@ common:
   mellow_rule_base: base/mellow.conf
   quan_rule_base: base/quan.conf
   quanx_rule_base: base/quanx.conf
+  loon_rule_base: base/loon.conf
+  proxy_config: SYSTEM
   proxy_ruleset: SYSTEM
   proxy_subscription: NONE
   append_proxy_type: false
@@ -19,16 +22,19 @@ userinfo:
   - {match: "^剩余流量：(.*?) (.*)$", replace: "total=$1&left=$2"}
   - {match: "^Bandwidth: (.*?)/(.*)$", replace: "used=$1&total=$2"}
   - {match: "^.*剩余(.*?)(?:\\s*?)@(?:.*)$", replace: "total=$1"}
+  - {match: "^.*?流量:(.*?) 剩:(?:.*)$", replace: "total=$1"}
   time_rule:
   - {match: "^过期时间：(\\d+)-(\\d+)-(\\d+) (\\d+):(\\d+):(\\d+)$", replace: "$1:$2:$3:$4:$5:$6"}
   - {match: "^到期时间:(\\d+)-(\\d+)-(\\d+)$", replace: "$1:$2:$3:0:0:0"}
   - {match: "^Smart Access expire: (\\d+)/(\\d+)/(\\d+)$", replace: "$1:$2:$3:0:0:0"}
+  - {match: "^.*?流量:(?:.*?) 剩:(.*?)天$", replace: "left=$1d"}
 
 node_pref:
   udp_flag: false
   tcp_fast_open_flag: false
   sort_flag: false
   skip_cert_verify_flag: false
+  filter_deprecated_nodes: false
   rename_node:
 #  - {match: "\\(?((x|X)?(\\d+)(\\.?\\d+)?)((\\s?倍率?)|(x|X))\\)?", replace: "$1x"}
   - {import: snippets/rename_node.txt}
@@ -36,6 +42,9 @@ node_pref:
 managed_config:
   write_managed_config: true
   managed_config_prefix: "http://127.0.0.1:25500"
+  config_update_interval: 86400
+  config_update_strict: false
+  quanx_device_id: ""
 
 surge_external_proxy:
   surge_ssr_path: "" # /usr/bin/ssr-local
@@ -71,6 +80,12 @@ server:
   port: 25500
 
 advanced:
+  log_level: info
   print_debug_info: false
   max_pending_connections: 10240
-  max_concurrent_threads: 4
+  max_concurrent_threads: 2
+  enable_base_gen: false
+  enable_cache: false
+  cache_subscription: 60
+  cache_config: 300
+  cache_ruleset: 21600

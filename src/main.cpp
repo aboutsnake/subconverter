@@ -10,7 +10,7 @@
 #include "webget.h"
 #include "logger.h"
 
-extern std::string pref_path, access_token, listen_address, gen_profile;
+extern std::string pref_path, access_token, listen_address, gen_profile, managed_config_prefix;
 extern bool api_mode, generator_mode, cfw_child_process, update_ruleset_on_request;
 extern int listen_port, max_concurrent_threads, max_pending_connections;
 extern string_array rulesets;
@@ -58,11 +58,25 @@ void chkArg(int argc, char *argv[])
             update_ruleset_on_request = true;
         }
         else if(strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--file") == 0)
-            pref_path.assign(argv[++i]);
+        {
+            if(i < argc - 1)
+                pref_path.assign(argv[++i]);
+        }
         else if(strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gen") == 0)
+        {
             generator_mode = true;
+        }
         else if(strcmp(argv[i], "--artifact") == 0)
-            gen_profile.assign(argv[++i]);
+        {
+            if(i < argc - 1)
+                gen_profile.assign(argv[++i]);
+        }
+        else if(strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--log") == 0)
+        {
+            if(i < argc - 1)
+                if(freopen(argv[++i], "a", stderr) == NULL)
+                    std::cerr<<"Error redirecting output to file.\n";
+        }
     }
 }
 
@@ -85,6 +99,10 @@ void signal_handler(int sig)
 
 int main(int argc, char *argv[])
 {
+    if(fileExist("pref.yml"))
+        pref_path = "pref.yml";
+    chkArg(argc, argv);
+    setcd(pref_path); //then switch to pref directory
     writeLog(0, "SubConverter " VERSION " starting up..", LOG_LEVEL_INFO);
 #ifdef _WIN32
     WSADATA wsaData;
@@ -95,6 +113,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     UINT origcp = GetConsoleOutputCP();
+    defer(SetConsoleOutputCP(origcp);)
     SetConsoleOutputCP(65001);
 #else
     signal(SIGPIPE, SIG_IGN);
@@ -110,23 +129,20 @@ int main(int argc, char *argv[])
     std::string prgpath = argv[0];
     setcd(prgpath); //first switch to program directory
 #endif // _DEBUG
-    if(fileExist("pref.yml"))
-        pref_path = "pref.yml";
-    chkArg(argc, argv);
-    setcd(pref_path); //then switch to pref directory
     readConf();
     if(!update_ruleset_on_request)
         refreshRulesets(rulesets, ruleset_content_array);
     generateBase();
 
+    std::string env_api_mode = GetEnv("API_MODE"), env_managed_prefix = GetEnv("MANAGED_PREFIX"), env_token = GetEnv("API_TOKEN");
+    api_mode = tribool().read(toLower(env_api_mode)).get(api_mode);
+    if(env_managed_prefix.size())
+        managed_config_prefix = env_managed_prefix;
+    if(env_token.size())
+        access_token = env_token;
+
     if(generator_mode)
-    {
-        int retVal = simpleGenerator();
-#ifdef _WIN32
-        SetConsoleOutputCP(origcp);
-#endif // _WIN32
-        return retVal;
-    }
+        return simpleGenerator();
 
     append_response("GET", "/", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
@@ -140,6 +156,9 @@ int main(int argc, char *argv[])
 
     append_response("GET", "/refreshrules", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
+        std::string &argument = request.argument;
+        int *status_code = &response.status_code;
+
         if(access_token.size())
         {
             std::string token = getUrlArg(argument, "token");
@@ -156,6 +175,9 @@ int main(int argc, char *argv[])
 
     append_response("GET", "/readconf", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
+        std::string &argument = request.argument;
+        int *status_code = &response.status_code;
+
         if(access_token.size())
         {
             std::string token = getUrlArg(argument, "token");
@@ -172,6 +194,10 @@ int main(int argc, char *argv[])
 
     append_response("POST", "/updateconf", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
+        std::string &argument = request.argument;
+        std::string postdata = request.postdata;
+        int *status_code = &response.status_code;
+
         if(access_token.size())
         {
             std::string token = getUrlArg(argument, "token");
@@ -213,86 +239,22 @@ int main(int argc, char *argv[])
 
     append_response("GET", "/qx-rewrite", "text/plain;charset=utf-8", getRewriteRemote);
 
-    append_response("GET", "/clash", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=clash", postdata, status_code, extra_headers);
-    });
+    append_response("GET", "/render", "text/plain;charset=utf-8", renderTemplate);
 
-    append_response("GET", "/clashr", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=clashr", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/surge", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=surge", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/surfboard", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=surfboard", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/mellow", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=mellow", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/ss", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=ss", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/sssub", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=sssub", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/ssr", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=ssr", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/v2ray", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=v2ray", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/quan", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=quan", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/quanx", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=quanx", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/loon", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=loon", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/ssd", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=ssd", postdata, status_code, extra_headers);
-    });
-
-    append_response("GET", "/trojan", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
-    {
-        return subconverter(argument + "&target=trojan", postdata, status_code, extra_headers);
-    });
+    append_response("GET", "/convert", "text/plain;charset=utf-8", getConvertedRuleset);
 
     if(!api_mode)
     {
         append_response("GET", "/get", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
         {
+            std::string &argument = request.argument;
             std::string url = UrlDecode(getUrlArg(argument, "url"));
             return webGet(url, "");
         });
 
         append_response("GET", "/getlocal", "text/plain;charset=utf-8", [](RESPONSE_CALLBACK_ARGS) -> std::string
         {
+            std::string &argument = request.argument;
             return fileGet(UrlDecode(getUrlArg(argument, "path")));
         });
     }

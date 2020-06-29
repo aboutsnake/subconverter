@@ -22,6 +22,7 @@ enum
 typedef std::map<std::string, std::multimap<std::string, std::string>> ini_data_struct;
 typedef std::multimap<std::string, std::string> string_multimap;
 typedef std::vector<std::string> string_array;
+typedef std::string::size_type string_size;
 
 class INIReader
 {
@@ -216,7 +217,7 @@ public:
         string_multimap itemGroup, existItemGroup;
         std::stringstream strStrm;
         unsigned int lineSize = 0;
-        char delimiter = count(content.begin(), content.end(), '\n') < 1 ? '\r' : '\n';
+        char delimiter = getLineBreak(content);
 
         EraseAll(); //first erase all data
         if(do_utf8_to_gbk && is_str_utf8(content))
@@ -240,7 +241,7 @@ public:
                 strLine.erase(lineSize - 1);
                 lineSize--;
             }
-            if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
+            if((!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) && !inDirectSaveSection) //empty lines and comments are ignored
                 continue;
             if(strLine[0] == '[' && strLine[lineSize - 1] == ']') //is a section title
             {
@@ -610,25 +611,41 @@ public:
     }
 
     /**
-    * @brief Retrieve one boolean item value with the exact same name in the given section.
+    * @brief Retrieve one number item value with the exact same name in the given section.
     */
-    int GetIntIfExist(const std::string &section, const std::string &itemName, int &target)
+    template <typename T> int GetNumberIfExist(const std::string &section, const std::string &itemName, T &target)
     {
         std::string result;
         int retval = GetIfExist(section, itemName, result);
         if(retval != INIREADER_EXCEPTION_NONE)
             return retval;
         if(result.size())
-            target = to_int(result, target);
+            target = to_number<T>(result, target);
         return INIREADER_EXCEPTION_NONE;
     }
 
     /**
-    * @brief Retrieve one boolean item value with the exact same name in current section.
+    * @brief Retrieve one number item value with the exact same name in current section.
+    */
+    template <typename T> int GetNumberIfExist(const std::string &itemName, T &target)
+    {
+        return current_section.size() ? GetNumberIfExist(current_section, itemName, target) : INIREADER_EXCEPTION_NOTEXIST;
+    }
+
+    /**
+    * @brief Retrieve one integer item value with the exact same name in the given section.
+    */
+    int GetIntIfExist(const std::string &section, const std::string &itemName, int &target)
+    {
+        return GetNumberIfExist<int>(section, itemName, target);
+    }
+
+    /**
+    * @brief Retrieve one integer item value with the exact same name in current section.
     */
     int GetIntIfExist(const std::string &itemName, int &target)
     {
-        return current_section.size() ? GetIntIfExist(current_section, itemName, target) : INIREADER_EXCEPTION_NOTEXIST;
+        return GetNumberIfExist<int>(itemName, target);
     }
 
     /**
@@ -904,20 +921,29 @@ public:
 
         for(auto &x : section_order)
         {
+            string_size strsize = 0;
             content += "[" + x + "]\n";
             if(ini_content.find(x) != ini_content.end())
             {
-                for(auto &y : ini_content.at(x))
+                auto section = ini_content.at(x);
+                if(section.empty())
                 {
-                    if(y.first != "{NONAME}")
-                        content += y.first + "=";
-                    content += y.second + "\n";
+                    content += "\n";
+                    continue;
+                }
+                for(auto iter = section.begin(); iter != section.end(); iter++)
+                {
+                    if(iter->first != "{NONAME}")
+                        content += iter->first + "=";
+                    content += iter->second + "\n";
+                    if(std::next(iter) == section.end())
+                        strsize = iter->second.size();
                 }
             }
-            content += "\n";
+            if(strsize)
+                content += "\n";
         }
-
-        return content.erase(content.size() - 2);
+        return content;
     }
 
     /**
